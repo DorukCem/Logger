@@ -1,13 +1,33 @@
-use std::{fs::File, io::Read, path::Path};
+use std::{
+    backtrace::{self, Backtrace},
+    env, fmt,
+    fs::{self, File},
+    io::{Read, Write},
+    path::{Path, PathBuf},
+};
 
+use chrono::{self, Utc};
 use serde_json::Value;
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
     Debug = 0,
     Info = 1,
     Warn = 2,
     Error = 3,
     Critical = 4,
+}
+
+impl fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LogLevel::Debug => write!(f, "DEBUG"),
+            LogLevel::Info => write!(f, "INFO"),
+            LogLevel::Warn => write!(f, "WARN"),
+            LogLevel::Error => write!(f, "ERROR"),
+            LogLevel::Critical => write!(f, "CRITICAL"),
+        }
+    }
 }
 
 impl LogLevel {
@@ -23,22 +43,71 @@ impl LogLevel {
     }
 }
 
+#[derive(Debug)]
 pub struct Logger {
     config: LogConfig,
+    log_file: File,
 }
 
 impl Logger {
     pub fn new(config: Option<LogConfig>) -> Self {
-        if let Some(config) = config {
-            Self { config }
-        } else {
-            Self {
-                config: LogConfig::new(),
-            }
+        let config = config.unwrap_or_else(LogConfig::new);
+        let mut path = PathBuf::from(env::current_dir().unwrap());
+        path.push("logs");
+        path.push(format!(
+            "{}{}",
+            &config.file_prefix,
+            &Utc::now()
+                .to_string()
+                .replace(['.', ':'], "-")
+                .replace(' ', "T")
+        ));
+        path.set_extension("log");
+
+        fs::create_dir_all(env::current_dir().unwrap().join("logs")).unwrap();
+        let log_file = File::create(path).unwrap();
+        Self { config, log_file }
+    }
+
+    fn log(&mut self, message: &str, log_level: LogLevel) {
+        let bt = Backtrace::force_capture();
+        let caller_name = bt
+            .frames()
+            .iter()
+            .rev()
+            .nth_back(4)
+            .expect("Could not get caller name");
+
+        if log_level >= self.config.level {
+            self.log_file
+                .write(format!("{}:{:?} {}\n", log_level, caller_name, message).as_bytes())
+                .unwrap();
         }
+    }
+
+    // Public methods for different log levels
+    pub fn debug(&mut self, message: &str) {
+        self.log(message, LogLevel::Debug);
+    }
+
+    pub fn info(&mut self, message: &str) {
+        self.log(message, LogLevel::Info);
+    }
+
+    pub fn warn(&mut self, message: &str) {
+        self.log(message, LogLevel::Warn);
+    }
+
+    pub fn error(&mut self, message: &str) {
+        self.log(message, LogLevel::Error);
+    }
+
+    pub fn critical(&mut self, message: &str) {
+        self.log(message, LogLevel::Critical);
     }
 }
 
+#[derive(Debug)]
 pub struct LogConfig {
     level: LogLevel,
     rolling_config: RollingConfig,
@@ -104,6 +173,7 @@ impl LogConfig {
     }
 }
 
+#[derive(Debug)]
 pub struct RollingConfig {
     time_threshold: RollingTimeOptions,
     size_threshold: RollingSizeOptions,
