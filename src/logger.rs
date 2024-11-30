@@ -3,6 +3,7 @@ use std::{
     env, fmt,
     fs::{self, File},
     io::{Read, Write},
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
 
@@ -52,6 +53,8 @@ pub struct Logger {
 impl Logger {
     pub fn new(config: Option<LogConfig>) -> Self {
         let config = config.unwrap_or_else(LogConfig::new);
+
+
         let mut path = PathBuf::from(env::current_dir().unwrap());
         path.push("logs");
         path.push(format!(
@@ -69,19 +72,53 @@ impl Logger {
         Self { config, log_file }
     }
 
-    fn log(&mut self, message: &str, log_level: LogLevel) {
-        let bt = Backtrace::force_capture();
-        let caller_name = bt
-            .frames()
-            .iter()
-            .rev()
-            .nth_back(4)
-            .expect("Could not get caller name");
+    fn create_new_log_file(&self) -> File{
+        let mut path = PathBuf::from(env::current_dir().unwrap());
+        path.push("logs");
+        path.push(format!(
+            "{}{}",
+            &self.config.file_prefix,
+            &Utc::now()
+                .to_string()
+                .replace(['.', ':'], "-")
+                .replace(' ', "T")
+        ));
+        path.set_extension("log");
 
+        fs::create_dir_all(env::current_dir().unwrap().join("logs")).unwrap();
+        let log_file = File::create(path).unwrap();
+        log_file
+    }
+
+    fn log(&mut self, message: &str, log_level: LogLevel) {
         if log_level >= self.config.level {
+            self.check_and_update_rolling();
+
+            let bt = Backtrace::force_capture();
+            let caller_name = bt
+                .frames()
+                .iter()
+                .rev()
+                .nth_back(4)
+                .expect("Could not get caller name");
             self.log_file
                 .write(format!("{}:{:?} {}\n", log_level, caller_name, message).as_bytes())
                 .unwrap();
+        }
+    }
+
+    fn check_and_update_rolling(&mut self) {
+        let meta: fs::Metadata = self.log_file.metadata().unwrap();
+        let file_size = meta.size();
+        let file_birth_time = meta.created().unwrap();
+        let now = std::time::SystemTime::now();
+        let time_difference = now
+            .duration_since(file_birth_time)
+            .expect("Clock may have gone backwards");
+        if file_size >= self.config.rolling_config.size_threshold as u64
+            || time_difference.as_secs() > self.config.rolling_config.time_threshold as u64
+        {
+            self.log_file = self.create_new_log_file();
         }
     }
 
@@ -228,7 +265,7 @@ impl RollingConfig {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum RollingSizeOptions {
     OneKB = 1024,
     FiveKB = 5 * 1024,
@@ -266,8 +303,9 @@ impl RollingSizeOptions {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum RollingTimeOptions {
+    FiveSecs = 5,
     Minutely = 60,
     Hourly = 60 * 60,
     Daily = 24 * 60 * 60,
@@ -279,6 +317,7 @@ pub enum RollingTimeOptions {
 impl RollingTimeOptions {
     fn from_u64(value: u64) -> Result<Self, &'static str> {
         match value {
+            x if x == RollingTimeOptions::FiveSecs as u64 => Ok(RollingTimeOptions::FiveSecs),
             x if x == RollingTimeOptions::Minutely as u64 => Ok(RollingTimeOptions::Minutely),
             x if x == RollingTimeOptions::Hourly as u64 => Ok(RollingTimeOptions::Hourly),
             x if x == RollingTimeOptions::Daily as u64 => Ok(RollingTimeOptions::Daily),

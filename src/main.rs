@@ -1,7 +1,8 @@
 #![feature(backtrace_frames)]
 
 use logger::*;
-use std::path::Path;
+use core::time;
+use std::{path::Path, thread::sleep};
 mod logger;
 
 fn nest(mut logger : Logger){
@@ -17,7 +18,10 @@ fn deep_nest(mut logger : Logger){
 fn main() {
     let config = LogConfig::from_json_file(Path::new("./config.demo.json"));
     let mut logger = Logger::new(Some(config));
-    
-    logger.error("Hello world!");
-    nest(logger);
+
+    for i in 0..=6 {
+        logger.critical(&format!("message in second {i}"));
+        sleep(time::Duration::from_secs(1));
+    }
+
 }
