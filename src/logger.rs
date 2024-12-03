@@ -1,5 +1,7 @@
+#![allow(dead_code)]
+
 use std::{
-    backtrace::{self, Backtrace},
+    backtrace::Backtrace,
     env, fmt,
     fs::{self, File},
     io::{Read, Write},
