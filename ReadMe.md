@@ -1,6 +1,6 @@
-# Logtar - A Flexible Logging Library for Rust
+# A Flexible Logging Library for Rust
 
-Logtar is a customizable logging library for Rust applications, featuring rolling log files based on size and time thresholds. It allows fine-grained control over logging levels, log file configurations, and dynamic configuration via JSON files.
+This is a customizable logging library for Rust applications, featuring rolling log files based on size and time thresholds. It allows control over logging levels, log file configurations, and dynamic configuration via JSON files.
 
 ---
 
